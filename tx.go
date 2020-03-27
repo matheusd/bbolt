@@ -524,24 +524,22 @@ func (tx *Tx) write() error {
 
 	// Write pages to disk in order.
 	for _, p := range pages {
-		size := (int(p.overflow) + 1) * tx.db.pageSize
+		rem := (uint64(p.overflow) + 1) * uint64(tx.db.pageSize)
 		offset := int64(p.id) * int64(tx.db.pageSize)
+		var written uint64
 
 		// Write out page in "max allocation" sized chunks.
-		ptr := uintptr(unsafe.Pointer(p))
 		for {
-			// Limit our write to our max allocation size.
-			sz := size
+			sz := rem
 			if sz > maxAllocSize-1 {
 				sz = maxAllocSize - 1
 			}
-
-			// Write chunk to disk.
 			buf := *(*[]byte)(unsafe.Pointer(&reflect.SliceHeader{
-				Data: ptr,
-				Len:  sz,
-				Cap:  sz,
+				Data: uintptr(unsafe.Pointer(p)) + uintptr(written),
+				Len:  int(sz),
+				Cap:  int(sz),
 			}))
+
 			if _, err := tx.db.ops.writeAt(buf, offset); err != nil {
 				return err
 			}
@@ -550,14 +548,14 @@ func (tx *Tx) write() error {
 			tx.stats.Write++
 
 			// Exit inner for loop if we've written all the chunks.
-			size -= sz
-			if size == 0 {
+			rem -= sz
+			if rem == 0 {
 				break
 			}
 
 			// Otherwise move offset forward and move pointer to next chunk.
 			offset += int64(sz)
-			ptr += uintptr(sz)
+			written += sz
 		}
 	}
 
